@@ -61,7 +61,7 @@ Vercel runs the API as short-lived functions, so there is no background worker t
 Every send is checked first, and refused before anything reaches PayPal if it would fail:
 
 - **Receivers PayPal turned away before** (for example `INVALID_EMAIL`) are blocked at upload and again at send, and so is an email domain where PayPal has turned away 3 or more addresses and paid none.
-- **The PayPal balance** is read before sending and shown on the approval card. With real money (`PAYPAL_MODE=live`) a batch the balance cannot cover is refused; in the sandbox, which lets the balance go negative, it is a warning.
+- **The PayPal balance** is read before sending and shown on the approval card. With real money (`PAYPAL_MODE=live`) a batch the balance cannot cover is refused; in the sandbox it is only a warning, because PayPal's reporting balance there leaves out balances set with the developer dashboard's edit button (payouts draw on the dashboard balance).
 
 ## APIMatic
 

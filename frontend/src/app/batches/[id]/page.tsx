@@ -435,7 +435,9 @@ export default function BatchPage() {
                 {preflight.short_by !== null ? (
                   <span style={{ color: "var(--warn-ink)" }}>
                     {money(preflight.short_by, preflight.currency)} short of this batch.{" "}
-                    {preflight.balance_blocks ? "Sending will be refused until funds are added." : "The sandbox lets the balance go negative, so it can still be sent."}
+                    {preflight.balance_blocks
+                      ? "Sending will be refused until funds are added."
+                      : "Sandbox: PayPal's reports leave out balances set in the developer dashboard, so it can still be sent."}
                   </span>
                 ) : null}
                 {preflight.turned_away.length ? (
