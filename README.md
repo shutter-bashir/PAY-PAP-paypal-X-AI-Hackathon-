@@ -32,6 +32,8 @@ npm run dev                                                # http://localhost:30
 
 Database: apply [backend/db/migrations/0001_initial_schema.sql](backend/db/migrations/0001_initial_schema.sql) to Supabase once; see [docs/database.md](docs/database.md).
 
+Full demo: `backend/seed/demo_video_250.csv` — 250 contractors, $18,500, 30 planted problems; rows 2–6 are real sandbox accounts and get paid, the rest stay pending (unclaimed).
+
 Demo batches: `backend/seed/batch_1_5_people.csv` to `batch_5_5_people.csv`, each paying the same 5 PayPal sandbox Personal accounts once with its own invoice numbers, so every payout ends SUCCESS.
 
 Large demo file: `.venv\Scripts\python scripts\seed_demo.py --load-directory` writes `backend/seed/demo_payouts.csv` (250 rows, about $18,500, with planted problems) and loads the recipient directory.
