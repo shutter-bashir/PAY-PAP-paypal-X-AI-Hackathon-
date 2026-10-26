@@ -226,3 +226,8 @@ def test_cron_tick_needs_the_cron_secret(client, monkeypatch):
 def test_cron_tick_is_off_without_a_secret(client, monkeypatch):
     monkeypatch.setattr(settings, "cron_secret", SecretStr(""))
     assert client.get("/api/cron/tick", headers={"Authorization": "Bearer "}).status_code == 401
+
+
+def test_the_bare_address_points_to_health_and_docs(client):
+    body = client.get("/").json()
+    assert body["status"] == "running" and body["health"] == "/health" and body["docs"] == "/docs"

@@ -141,6 +141,13 @@ def me(user: UserDep):
     return user
 
 
+@app.get("/")
+def root():
+    """The bare address: this is an API, so point to what is useful."""
+    return {"service": "Pay pap API", "status": "running", "health": "/health", "docs": "/docs",
+            "web_app": settings.frontend_url.split(",")[0].strip()}
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "paypal_mode": settings.paypal_mode, "ai_provider": settings.ai_provider,
