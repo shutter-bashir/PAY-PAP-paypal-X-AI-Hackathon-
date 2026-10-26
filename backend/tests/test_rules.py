@@ -224,3 +224,28 @@ def test_approval_limits_batch_total_and_count():
                 {"row_number": 3, "receiver": "b@example.com", "amount": 60}]
     problems = rules.check_approval_limits(included, limits)
     assert any("batch cap" in p for p in problems) and any("row batch limit" in p for p in problems)
+
+
+def _payout(receiver, status, at, error=None):
+    return {"receiver": receiver, "payout_status": status, "payout_status_at": at, "payout_error": error}
+
+
+INVALID = {"name": "INVALID_EMAIL", "message": "Email Address doesn't exist."}
+
+
+def test_paypal_history_blocks_receivers_and_domains_paypal_turned_away():
+    history = rules.PayPalHistory.from_payouts(
+        [_payout(f"p{i}@dead.example", "FAILED", "2026-10-26", INVALID) for i in range(3)]
+        + [_payout("ok@live.example", "SUCCESS", "2026-10-25"), _payout("x@live.example", "FAILED", "2026-10-26", INVALID)])
+    assert history.problem("P0@dead.example")[0] == "PAYPAL_REJECTED_RECEIVER"
+    assert history.problem("new@dead.example")[0] == "PAYPAL_REJECTED_DOMAIN"  # 3 turned away, none paid
+    assert history.problem("new@live.example") is None  # the domain has been paid before
+    assert history.problem("x@live.example")[0] == "PAYPAL_REJECTED_RECEIVER"
+
+
+def test_a_later_success_clears_a_receiver_and_other_failures_say_nothing():
+    history = rules.PayPalHistory.from_payouts([
+        _payout("a@x.example", "FAILED", "2026-10-25", INVALID), _payout("a@x.example", "SUCCESS", "2026-10-26"),
+        _payout("b@x.example", "FAILED", "2026-10-26", {"name": "INSUFFICIENT_FUNDS", "message": "low balance"}),
+    ])
+    assert history.problem("a@x.example") is None and history.problem("b@x.example") is None

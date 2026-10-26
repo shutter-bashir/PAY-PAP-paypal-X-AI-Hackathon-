@@ -111,7 +111,7 @@ export default function UploadPage() {
           <IconUpload size={24} />
         </span>
         <span style={{ fontWeight: 600 }}>{file ? file.name : "Choose a CSV file or drop it here"}</span>
-        <span className="muted" style={{ fontSize: 12 }}>Comma, semicolon or tab separated · up to 5 MB</span>
+        <span className="muted" style={{ fontSize: 12 }}>Comma, semicolon or tab separated · up to 4 MB</span>
       </label>
 
       <ErrorNote error={error} />

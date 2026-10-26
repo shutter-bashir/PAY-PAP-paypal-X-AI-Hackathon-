@@ -24,8 +24,8 @@ from decimal import Decimal
 
 import httpx
 
-from app import approvals
-from app.paypal_client import PayPalClient, debug_id, safe_json
+from app import approvals, rules
+from app.paypal_client import PayPalClient, PayPalError, debug_id, safe_json
 from app.store import Store, StoreError
 
 log = logging.getLogger(__name__)
@@ -150,8 +150,42 @@ def item_update_from_paypal(item: Mapping, *, event_at: str | None) -> dict | No
 # --- Operations ----------------------------------------------------------------
 
 
+@dataclass
+class Preflight:
+    """What is known before sending: rows PayPal is expected to turn away, and the balance."""
+    total: Decimal
+    currency: str
+    turned_away: list[dict]  # {"row", "receiver", "code", "reason"}
+    balance: Decimal | None = None
+    balance_error: str | None = None
+
+    @property
+    def short_by(self) -> Decimal | None:
+        return self.total - self.balance if self.balance is not None and self.balance < self.total else None
+
+
+def preflight(store: Store, paypal: PayPalClient, *, batch_id: str, currency: str) -> Preflight:
+    included = store.included_items(batch_id)
+    history = rules.PayPalHistory.from_payouts(store.payout_history())
+    turned_away = []
+    for item in included:
+        problem = history.problem(item["receiver"]) if item.get("receiver") else None
+        if problem:
+            turned_away.append({"row": item["row_number"], "receiver": item["receiver"], "code": problem[0],
+                                "reason": problem[1]})
+    check = Preflight(total=sum((Decimal(str(i["amount"])) for i in included), Decimal(0)), currency=currency,
+                      turned_away=turned_away)
+    try:
+        check.balance = paypal.available_balance(currency)
+    except (PayPalError, httpx.HTTPError) as exc:
+        check.balance_error = str(exc)
+    return check
+
+
 def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_secret: str,
-                 submitted_by: str | None = None) -> SubmitResult:
+                 submitted_by: str | None = None, require_funds: bool = False) -> SubmitResult:
+    """require_funds: refuse when the PayPal balance cannot cover the batch. Live PayPal denies such a
+    batch; the sandbox lets the balance go negative, so there it is only a warning."""
     approval = store.live_approval(batch_id)
     if approval is None:
         raise SubmitRefused("This batch has no live approval. An approver must approve it first.")
@@ -160,6 +194,25 @@ def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_s
                           batch_id=batch_id, details={"reason": "approval signature does not match"})
         raise SubmitRefused("The approval record's signature does not match, so it was not made by this API "
                             "or was changed afterwards. Revoke it and approve again.")
+
+    # Checked before an attempt is recorded, so a refusal leaves the batch approved and untouched.
+    check = preflight(store, paypal, batch_id=batch_id, currency=approval["currency"])
+    if check.turned_away:
+        rows = ", ".join(f"{t['row']} ({t['receiver']})" for t in check.turned_away[:10])
+        store.write_audit(action="payout.refused", entity_type="batch", entity_id=batch_id, batch_id=batch_id,
+                          details={"reason": "receivers PayPal turned away before", "rows": check.turned_away[:50]})
+        raise SubmitRefused(f"Not sent: PayPal turned away earlier payouts to row(s) {rows}"
+                            f"{' and more' if len(check.turned_away) > 10 else ''}, so they would fail again. "
+                            "Revoke the approval, leave those rows out, and approve again.")
+    if check.short_by is not None:
+        details = {"balance": str(check.balance), "total": str(check.total), "currency": check.currency}
+        if require_funds:
+            store.write_audit(action="payout.refused", entity_type="batch", entity_id=batch_id, batch_id=batch_id,
+                              details={"reason": "PayPal balance too low", **details})
+            raise SubmitRefused(f"Not sent: the PayPal balance ({check.balance} {check.currency}) is "
+                                f"{check.short_by} short of this batch ({check.total}). Add funds and send again.")
+        store.write_audit(action="payout.balance_warning", entity_type="batch", entity_id=batch_id,
+                          batch_id=batch_id, details=details)
 
     try:
         submission = store.claim_for_submit(batch_id, approval["id"], submitted_by)

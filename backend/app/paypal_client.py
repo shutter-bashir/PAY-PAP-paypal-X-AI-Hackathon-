@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from decimal import Decimal
 
 import httpx
 
@@ -81,6 +82,19 @@ class PayPalClient:
         if response.status_code != 200:
             raise PayPalError.from_response(response)
         return response.json()
+
+    # --- Balance -----------------------------------------------------------
+
+    def available_balance(self, currency: str) -> Decimal | None:
+        """The sending account's available balance in `currency` (GET /v1/reporting/balances),
+        or None when PayPal lists no balance in that currency."""
+        response = self._request("GET", "/v1/reporting/balances", params={"currency_code": currency})
+        if response.status_code != 200:
+            raise PayPalError.from_response(response)
+        for balance in (safe_json(response) or {}).get("balances", []):
+            if balance.get("currency") == currency and balance.get("available_balance"):
+                return Decimal(str(balance["available_balance"]["value"]))
+        return None
 
     # --- Webhooks ----------------------------------------------------------
 

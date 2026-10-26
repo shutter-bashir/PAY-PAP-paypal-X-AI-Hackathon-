@@ -202,3 +202,13 @@ export interface Meta {
   ai: { provider: string; model: string; enabled: boolean };
   poll_interval_seconds: number;
 }
+
+export interface Preflight {
+  total: string;
+  currency: string;
+  turned_away: { row: number; receiver: string; code: string; reason: string }[];
+  balance: string | null;
+  balance_error: string | null;
+  short_by: string | null;
+  balance_blocks: boolean;
+}

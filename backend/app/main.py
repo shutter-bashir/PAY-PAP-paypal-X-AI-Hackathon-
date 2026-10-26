@@ -11,6 +11,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Literal
 
+import httpx
 import jwt
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -270,7 +271,7 @@ def ask_agent(batch_id: str, body: AgentIn, store: StoreDep, user: UserDep):
     return {"text": reply.text, "tool_calls": reply.tool_calls, "proposal": reply.proposal}
 
 
-MAX_AUDIO_BYTES = 10 * 1024 * 1024  # about 10 minutes of compressed speech
+MAX_AUDIO_BYTES = 4 * 1024 * 1024  # minutes of compressed speech; Vercel refuses request bodies over 4.5 MB
 
 
 @app.post("/api/voice/transcribe")
@@ -327,7 +328,7 @@ def submit(batch_id: str, store: StoreDep, user: UserDep):
     try:
         result = payouts.submit_batch(store, get_paypal(), batch_id=batch_id,
                                       signing_secret=settings.approval_signing_secret.get_secret_value(),
-                                      submitted_by=user.id)
+                                      submitted_by=user.id, require_funds=settings.paypal_mode == "live")
     except payouts.SubmitRefused as exc:
         raise HTTPException(409, str(exc))
     return result.__dict__
@@ -386,6 +387,16 @@ def cron_tick(request: Request, store: StoreDep):
     return {"polled": worker.poll_once(store, get_paypal()), "approvals_expired": worker.expire_approvals(store)}
 
 
+@app.get("/api/batches/{batch_id}/preflight")
+def batch_preflight(batch_id: str, store: StoreDep, _: UserDep):
+    """What sending would run into: included rows PayPal turned away before, and the PayPal balance."""
+    check = payouts.preflight(store, get_paypal(), batch_id=batch_id, currency=store.get_batch(batch_id)["currency"])
+    return {"total": str(check.total), "currency": check.currency, "turned_away": check.turned_away,
+            "balance": None if check.balance is None else str(check.balance), "balance_error": check.balance_error,
+            "short_by": None if check.short_by is None else str(check.short_by),
+            "balance_blocks": settings.paypal_mode == "live"}
+
+
 @app.post("/api/batches/{batch_id}/sync")
 def sync(batch_id: str, store: StoreDep, _: UserDep):
     try:
@@ -394,6 +405,8 @@ def sync(batch_id: str, store: StoreDep, _: UserDep):
         raise HTTPException(409, str(exc))
     except PayPalError as exc:
         raise HTTPException(502, str(exc))
+    except httpx.HTTPError as exc:  # timeout or network failure reaching PayPal
+        raise HTTPException(504, f"Could not reach PayPal: {exc}")
     return result.__dict__
 
 

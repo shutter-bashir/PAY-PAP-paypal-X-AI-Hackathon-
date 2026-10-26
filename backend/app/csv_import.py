@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
-MAX_FILE_BYTES = 5 * 1024 * 1024
+MAX_FILE_BYTES = 4 * 1024 * 1024  # Vercel refuses request bodies over 4.5 MB
 MAX_ROWS = 15_000  # PayPal's item limit for one payout batch
 
 # Field -> header names that map to it, compared after normalize_header().

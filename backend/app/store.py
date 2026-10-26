@@ -118,6 +118,12 @@ class Store:
                               .in_("id", list(item_ids[start:start + 100])).order("row_number"))
         return rows
 
+    def payout_history(self) -> list[dict]:
+        """Every row PayPal has reported on, across all batches: what it did with each receiver."""
+        return self._all(lambda: self._db.table("batch_items")
+                         .select("receiver,payout_status,payout_error,payout_status_at")
+                         .not_.is_("payout_status", "null").order("payout_status_at"))
+
     def committed_items(self, batch_id: str) -> list[dict]:
         return self._all(lambda: self._db.table("batch_items")
                          .select("id,row_number,receiver_type,receiver,amount,currency,invoice_id,note")

@@ -31,7 +31,8 @@ def run_rules(parsed: ImportResult, store: Store, settings) -> rules.RuleResult:
     }
     paid = {(p["receiver"], p["invoice_id"].lower()): p["batch_no"] for p in context.get("paid_invoices", [])}
     ctx = rules.RuleContext(currency=settings.paypal_currency, limits=rules.Limits.from_settings(settings),
-                            directory=directory, paid_invoices=paid)
+                            directory=directory, paid_invoices=paid,
+                            paypal_history=rules.PayPalHistory.from_payouts(store.payout_history()))
     return rules.evaluate(parsed.rows, ctx)
 
 

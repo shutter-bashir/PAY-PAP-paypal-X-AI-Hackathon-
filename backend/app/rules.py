@@ -23,7 +23,7 @@ from email_validator import EmailNotValidError, validate_email
 
 from app.csv_import import ParsedRow
 
-RULES_VERSION = "2026-10-24.1"
+RULES_VERSION = "2026-10-26.1"
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -74,6 +74,68 @@ class RuleContext:
     limits: Limits
     directory: Mapping[str, DirectoryEntry] = field(default_factory=dict)  # receiver -> entry
     paid_invoices: Mapping[tuple[str, str], int] = field(default_factory=dict)  # (receiver, invoice lower) -> batch_no
+    paypal_history: PayPalHistory = field(default_factory=lambda: PayPalHistory())
+
+
+DOMAIN_REJECTIONS_TO_BLOCK = 3  # receivers PayPal turned away on one domain, with none paid, before the domain is blocked
+
+
+@dataclass(frozen=True)
+class PayPalHistory:
+    """What PayPal did with earlier payouts, so a row that would fail the same way is caught before sending."""
+    rejected: Mapping[str, str] = field(default_factory=dict)  # receiver -> PayPal's reason, if the last payout was turned away
+    domain_rejected: Mapping[str, int] = field(default_factory=dict)  # email domain -> receivers turned away
+    domain_paid: Mapping[str, int] = field(default_factory=dict)  # email domain -> receivers paid
+
+    @classmethod
+    def from_payouts(cls, payouts: Sequence[Mapping]) -> PayPalHistory:
+        """`payouts`: earlier batch items with receiver, payout_status, payout_error and payout_status_at."""
+        latest: dict[str, Mapping] = {}
+        for p in sorted((p for p in payouts if p.get("receiver") and p.get("payout_status")),
+                        key=lambda p: p.get("payout_status_at") or ""):
+            latest[p["receiver"].lower()] = p
+        rejected = {r: reason for r, p in latest.items() if (reason := receiver_rejection(p)) is not None}
+        paid = {r for r, p in latest.items() if p["payout_status"] == "SUCCESS"}
+        domains_rejected: dict[str, int] = defaultdict(int)
+        domains_paid: dict[str, int] = defaultdict(int)
+        for r in rejected:
+            domains_rejected[_domain(r)] += 1
+        for r in paid:
+            domains_paid[_domain(r)] += 1
+        return cls(rejected, dict(domains_rejected), dict(domains_paid))
+
+    def problem(self, receiver: str) -> tuple[str, str, dict] | None:
+        """(code, message, evidence) when PayPal is expected to turn this receiver away."""
+        receiver = receiver.lower()
+        if receiver in self.rejected:
+            return ("PAYPAL_REJECTED_RECEIVER",
+                    f"PayPal turned away the last payout to {receiver} ({self.rejected[receiver]}). Sending again "
+                    "would fail the same way: check the email and that it is a PayPal account.",
+                    {"receiver": receiver, "paypal_reason": self.rejected[receiver]})
+        domain = _domain(receiver)
+        turned_away = self.domain_rejected.get(domain, 0)
+        if turned_away >= DOMAIN_REJECTIONS_TO_BLOCK and not self.domain_paid.get(domain):
+            return ("PAYPAL_REJECTED_DOMAIN",
+                    f"PayPal has turned away payouts to {turned_away} @{domain} addresses and paid none, "
+                    "so this one would very likely fail too.",
+                    {"domain": domain, "receivers_turned_away": turned_away})
+        return None
+
+
+def receiver_rejection(payout: Mapping) -> str | None:
+    """PayPal's reason when it failed a payout because of the receiver (e.g. INVALID_EMAIL), else None.
+    Failures for other reasons (funds, limits) say nothing about the receiver."""
+    if payout.get("payout_status") != "FAILED":
+        return None
+    error = payout.get("payout_error") or {}
+    name = str(error.get("name") or "") if isinstance(error, Mapping) else ""
+    if "EMAIL" in name or name.startswith("RECEIVER"):
+        return f"{name}: {error.get('message')}" if error.get("message") else name
+    return None
+
+
+def _domain(receiver: str) -> str:
+    return receiver.rsplit("@", 1)[-1].lower()
 
 
 @dataclass
@@ -242,6 +304,16 @@ def rule_recipient_vetting(rows, ctx):
                        {"receiver": r.receiver})
 
 
+def rule_paypal_rejected(rows, ctx):
+    for r in rows:
+        if r.receiver is None or email_problem(r.receiver):
+            continue
+        problem = ctx.paypal_history.problem(r.receiver)
+        if problem:
+            code, message, evidence = problem
+            yield Flag(code, BLOCKING, message, r.row_number, evidence)
+
+
 def rule_name_mismatch(rows, ctx):
     for r in rows:
         entry = ctx.directory.get(r.receiver) if r.receiver else None
@@ -289,6 +361,7 @@ ROW_RULES: list[Rule] = [
     rule_missing_invoice,
     rule_invoice_already_paid,
     rule_recipient_vetting,
+    rule_paypal_rejected,
     rule_name_mismatch,
     rule_outlier_amount,
 ]

@@ -93,6 +93,7 @@ FLAG_CODES = sorted({
     "BELOW_MINIMUM", "INVALID_CURRENCY", "CURRENCY_MISMATCH", "AMOUNT_OVER_CAP", "RECIPIENT_TOTAL_OVER_CAP",
     "DUPLICATE_INVOICE", "INVOICE_SHARED", "DUPLICATE_RECIPIENT", "MISSING_INVOICE", "INVOICE_ALREADY_PAID",
     "NEW_RECIPIENT", "RECIPIENT_BLOCKED", "RECIPIENT_NOT_VETTED", "NAME_MISMATCH", "OUTLIER_AMOUNT",
+    "PAYPAL_REJECTED_RECEIVER", "PAYPAL_REJECTED_DOMAIN",
     "BATCH_OVER_TOTAL_CAP", "BATCH_TOO_MANY_ITEMS",
 })
 
@@ -572,7 +573,8 @@ class AgentTools:
             raise payouts.SubmitRefused("Submitting is not enabled in this context.")
         with self._paypal_factory() as paypal:
             result = payouts.submit_batch(self._store, paypal, batch_id=self._batch_id, signing_secret=secret,
-                                          submitted_by=self._user_id)
+                                          submitted_by=self._user_id,
+                                          require_funds=self._settings.paypal_mode == "live")
         return {"outcome": result.outcome, "batch_status": result.batch_status, "attempt": result.attempt_no,
                 "paypal_payout_batch_id": result.payout_batch_id, "error": result.error}
 

@@ -13,6 +13,8 @@ const RULES: { code: string; severity: "blocking" | "warning"; what: string }[] 
   { code: "AMOUNT_OVER_CAP", severity: "blocking", what: "One payment above the per-person cap." },
   { code: "INVOICE_ALREADY_PAID", severity: "blocking", what: "This invoice was already paid to this person in an earlier batch." },
   { code: "RECIPIENT_BLOCKED", severity: "blocking", what: "The contractor is blocked in the directory." },
+  { code: "PAYPAL_REJECTED_RECEIVER", severity: "blocking", what: "PayPal turned away the last payout to this email (for example INVALID_EMAIL), so it would fail again." },
+  { code: "PAYPAL_REJECTED_DOMAIN", severity: "blocking", what: "PayPal has turned away payouts to 3 or more addresses on this email domain and paid none." },
   { code: "MALFORMED_ROW", severity: "blocking", what: "The row's values don't line up with the header (often an unquoted 1,200.00)." },
   { code: "DUPLICATE_INVOICE / INVOICE_SHARED", severity: "warning", what: "The same invoice appears twice, or under two different people." },
   { code: "DUPLICATE_RECIPIENT", severity: "warning", what: "The same person is paid more than once for different invoices." },

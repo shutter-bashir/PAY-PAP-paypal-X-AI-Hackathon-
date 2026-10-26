@@ -215,7 +215,7 @@ def cmd_submit(args) -> int:
     with PayPalClient.from_settings(settings) as paypal:
         result = payouts.submit_batch(store, paypal, batch_id=batch["id"],
                                       signing_secret=settings.approval_signing_secret.get_secret_value(),
-                                      submitted_by=user["id"])
+                                      submitted_by=user["id"], require_funds=settings.paypal_mode == "live")
     print(f"attempt {result.attempt_no}: {result.outcome} (HTTP {result.http_status}) -> batch {result.batch_status}")
     if result.payout_batch_id:
         print(f"  PayPal payout_batch_id {result.payout_batch_id}")

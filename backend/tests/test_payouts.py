@@ -22,9 +22,9 @@ class FakeStore:
                       "email_subject": None, "email_message": None, "submitted_at": "2026-10-24T10:00:00+00:00",
                       "paypal_payout_batch_id": None}
         self.items = [
-            {"id": ITEM_IDS[0], "receiver_type": "EMAIL", "receiver": "ann@example.com", "amount": 100,
+            {"id": ITEM_IDS[0], "row_number": 2, "receiver_type": "EMAIL", "receiver": "ann@example.com", "amount": 100,
              "currency": "USD", "invoice_id": "INV-1", "note": None},
-            {"id": ITEM_IDS[1], "receiver_type": "EMAIL", "receiver": "bob@example.com", "amount": 50.5,
+            {"id": ITEM_IDS[1], "row_number": 3, "receiver_type": "EMAIL", "receiver": "bob@example.com", "amount": 50.5,
              "currency": "USD", "invoice_id": None, "note": "Thanks"},
         ]
         fields = dict(approval_id="11111111-1111-4111-8111-111111111111", batch_id=BATCH_ID,
@@ -42,6 +42,7 @@ class FakeStore:
         self.batch_statuses = []
         self.events = set()
         self.claim_error = None
+        self.history = []  # earlier payouts PayPal reported on, for the pre-send check
 
     def live_approval(self, batch_id):
         return self.approval
@@ -60,6 +61,12 @@ class FakeStore:
 
     def committed_items(self, batch_id):
         return self.items
+
+    def included_items(self, batch_id):
+        return self.items
+
+    def payout_history(self):
+        return self.history
 
     def record_submission_result(self, submission_id, **kwargs):
         self.results.append({"submission_id": submission_id, **kwargs})
@@ -87,10 +94,13 @@ class FakeStore:
         pass
 
 
-def paypal_with(handler):
+def paypal_with(handler, balance="100000.00"):
     def route(request: httpx.Request):
         if request.url.path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        if request.url.path == "/v1/reporting/balances":
+            return httpx.Response(200, json={"balances": [{"currency": "USD", "available_balance":
+                                                           {"currency_code": "USD", "value": balance}}]})
         return handler(request)
     return PayPalClient("https://api-m.sandbox.paypal.com", "id", "secret", transport=httpx.MockTransport(route))
 
@@ -240,6 +250,8 @@ def test_expired_token_is_refreshed_once():
     def route(request):
         if request.url.path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": next(tokens), "expires_in": 3600})
+        if request.url.path == "/v1/reporting/balances":  # the pre-send check; not what this test is about
+            return httpx.Response(200, json={"balances": []})
         calls.append(request.headers["Authorization"])
         return httpx.Response(401) if len(calls) == 1 else created(request)
 
@@ -331,3 +343,44 @@ def test_webhook_signature_check_sends_the_headers():
     assert seen[0]["webhook_id"] == "WHID" and seen[0]["transmission_sig"] == "sig"
     assert not paypal.verify_webhook_signature(headers={}, event=item_event(), webhook_id="WHID")
     assert len(seen) == 1  # missing headers never reach PayPal
+
+
+def rejected(receiver, at="2026-10-26T10:00:00+00:00"):
+    return {"receiver": receiver, "payout_status": "FAILED", "payout_status_at": at,
+            "payout_error": {"name": "INVALID_EMAIL", "message": "Email Address doesn't exist."}}
+
+
+def test_receivers_paypal_turned_away_are_refused_before_any_attempt():
+    store = FakeStore()
+    store.history = [rejected("bob@example.com")]
+    with pytest.raises(payouts.SubmitRefused, match=r"row\(s\) 3 \(bob@example.com\)"):
+        submit(store, paypal_with(lambda r: pytest.fail("PayPal must not be called")))
+    assert store.attempts == [] and store.audits[-1]["action"] == "payout.refused"
+
+
+def test_low_balance_blocks_only_when_funds_are_required():
+    store = FakeStore()
+    with pytest.raises(payouts.SubmitRefused, match="short"):
+        payouts.submit_batch(store, paypal_with(lambda r: pytest.fail("not sent"), balance="100.00"),
+                             batch_id=BATCH_ID, signing_secret=SECRET, require_funds=True)
+    assert store.attempts == []
+    # The sandbox lets the balance go negative: warn, then send.
+    result = submit(store, paypal_with(created, balance="-12398.81"))
+    assert result.outcome == "accepted" and store.audits[-1]["action"] == "payout.balance_warning"
+
+
+def test_an_unreadable_balance_does_not_stop_a_payout():
+    def no_balance(request):
+        return created(request)
+
+    def route(request):
+        if request.url.path == "/v1/oauth2/token":
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+        if request.url.path == "/v1/reporting/balances":
+            return httpx.Response(403, json={"name": "NOT_AUTHORIZED", "message": "no reporting access"})
+        return no_balance(request)
+
+    paypal = PayPalClient("https://api-m.sandbox.paypal.com", "id", "secret", transport=httpx.MockTransport(route))
+    check = payouts.preflight(FakeStore(), paypal, batch_id=BATCH_ID, currency="USD")
+    assert check.balance is None and "403" in check.balance_error and check.total == Decimal("150.5")
+    assert submit(FakeStore(), paypal).outcome == "accepted"

@@ -32,7 +32,7 @@ import RowDetail from "@/components/RowDetail";
 import { ErrorNote, StatusBadge } from "@/components/Status";
 import { api, download, money, when } from "@/lib/api";
 import { ShellAction, SHELL_EVENT, takeStashed } from "@/lib/bus";
-import type { BatchDetail, Decision, FilterSpec, Item, Overview } from "@/lib/types";
+import type { BatchDetail, Decision, FilterSpec, Item, Overview, Preflight } from "@/lib/types";
 import { useUser } from "@/lib/useSession";
 
 type Tab = "review" | "reconcile" | "audit" | "ai";
@@ -79,6 +79,21 @@ export default function BatchPage() {
   useEffect(() => {
     if (user) load();
   }, [user, load]);
+
+  // Before sending: the PayPal balance, and included rows PayPal turned away before.
+  const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const includedKey = `${detail?.overview.status}|${detail?.overview.included_count}|${detail?.overview.included_total}`;
+  useEffect(() => {
+    if (!detail || !["in_review", "approved", "submitting"].includes(detail.overview.status)) return;
+    let live = true;
+    api<Preflight>(`/api/batches/${id}/preflight`)
+      .then((p) => live && setPreflight(p))
+      .catch(() => live && setPreflight(null));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check only when the included rows change
+  }, [id, includedKey]);
 
   // While PayPal works on the batch, ask it for news on each refresh: on serverless hosting there is
   // no worker polling in the background, and a missed webhook would otherwise leave rows pending.
@@ -409,6 +424,28 @@ export default function BatchPage() {
                 <span className="muted" style={{ fontSize: 11 }}>Attempt{detail.submissions.length === 1 ? "" : "s"}</span>
               </li>
             </ol>
+
+            {preflight ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>
+                <span className="muted">
+                  PayPal balance:{" "}
+                  {preflight.balance !== null ? <strong style={{ color: "var(--ink)" }}>{money(preflight.balance, preflight.currency)}</strong> : "could not be read"}
+                </span>
+                {preflight.short_by !== null ? (
+                  <span style={{ color: "var(--warn-ink)" }}>
+                    {money(preflight.short_by, preflight.currency)} short of this batch.{" "}
+                    {preflight.balance_blocks ? "Sending will be refused until funds are added." : "The sandbox lets the balance go negative, so it can still be sent."}
+                  </span>
+                ) : null}
+                {preflight.turned_away.length ? (
+                  <span style={{ color: "var(--bad)" }}>
+                    PayPal turned away earlier payouts to row{preflight.turned_away.length === 1 ? "" : "s"}{" "}
+                    {preflight.turned_away.slice(0, 8).map((t) => t.row).join(", ")}
+                    {preflight.turned_away.length > 8 ? "…" : ""}. Leave {preflight.turned_away.length === 1 ? "it" : "them"} out, or sending will be refused.
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
             {ov.status === "in_review" ? (
               user.role !== "approver" ? (
