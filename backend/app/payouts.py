@@ -190,8 +190,8 @@ def preflight(store: Store, balances: BalanceReader | None, *, batch_id: str, cu
 def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_secret: str,
                  submitted_by: str | None = None, balances: BalanceReader | None = None,
                  require_funds: bool = False) -> SubmitResult:
-    """require_funds: refuse when the PayPal balance cannot cover the batch. Live PayPal denies such a
-    batch; the sandbox lets the balance go negative, so there it is only a warning."""
+    """require_funds: refuse when the PayPal balance cannot cover the batch (live mode). In the sandbox the
+    reported balance is not what payouts draw on, so it is not checked against the batch."""
     approval = store.live_approval(batch_id)
     if approval is None:
         raise SubmitRefused("This batch has no live approval. An approver must approve it first.")
@@ -210,15 +210,14 @@ def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_s
         raise SubmitRefused(f"Not sent: PayPal turned away earlier payouts to row(s) {rows}"
                             f"{' and more' if len(check.turned_away) > 10 else ''}, so they would fail again. "
                             "Revoke the approval, leave those rows out, and approve again.")
-    if check.short_by is not None:
-        details = {"balance": str(check.balance), "total": str(check.total), "currency": check.currency}
-        if require_funds:
-            store.write_audit(action="payout.refused", entity_type="batch", entity_id=batch_id, batch_id=batch_id,
-                              details={"reason": "PayPal balance too low", **details})
-            raise SubmitRefused(f"Not sent: the PayPal balance ({check.balance} {check.currency}) is "
-                                f"{check.short_by} short of this batch ({check.total}). Add funds and send again.")
-        store.write_audit(action="payout.balance_warning", entity_type="batch", entity_id=batch_id,
-                          batch_id=batch_id, details=details)
+    # Only with real money: in the sandbox PayPal's reported balance lags and leaves out balances set
+    # in the developer dashboard, which is what payouts there actually draw on.
+    if check.short_by is not None and require_funds:
+        store.write_audit(action="payout.refused", entity_type="batch", entity_id=batch_id, batch_id=batch_id,
+                          details={"reason": "PayPal balance too low", "balance": str(check.balance),
+                                   "total": str(check.total), "currency": check.currency})
+        raise SubmitRefused(f"Not sent: the PayPal balance ({check.balance} {check.currency}) is "
+                            f"{check.short_by} short of this batch ({check.total}). Add funds and send again.")
 
     try:
         submission = store.claim_for_submit(batch_id, approval["id"], submitted_by)

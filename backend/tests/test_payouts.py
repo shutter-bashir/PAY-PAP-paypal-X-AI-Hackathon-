@@ -371,10 +371,10 @@ def test_low_balance_blocks_only_when_funds_are_required():
         payouts.submit_batch(store, paypal_with(lambda r: pytest.fail("not sent")), batch_id=BATCH_ID,
                              signing_secret=SECRET, balances=FakeBalances("100.00"), require_funds=True)
     assert store.attempts == []
-    # The sandbox lets the balance go negative: warn, then send.
+    # Sandbox: the reported balance is not what payouts draw on, so a shortfall neither blocks nor warns.
     result = payouts.submit_batch(store, paypal_with(created), batch_id=BATCH_ID, signing_secret=SECRET,
                                   balances=FakeBalances("-12398.81"))
-    assert result.outcome == "accepted" and store.audits[-1]["action"] == "payout.balance_warning"
+    assert result.outcome == "accepted" and not any(a["action"] == "payout.balance_warning" for a in store.audits)
 
 
 def test_an_unreadable_balance_does_not_stop_a_payout():

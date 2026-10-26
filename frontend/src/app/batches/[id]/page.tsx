@@ -430,14 +430,13 @@ export default function BatchPage() {
                 <span className="muted">
                   PayPal balance:{" "}
                   {preflight.balance !== null ? <strong style={{ color: "var(--ink)" }}>{money(preflight.balance, preflight.currency)}</strong> : "could not be read"}
-                  <span title="Read with the APIMatic PayPal SDK. PayPal can take up to 3 hours to update a balance."> · may lag up to 3 h</span>
+                  <span title="PayPal's reported balance, read with the APIMatic PayPal SDK. It can take hours to update, and in the sandbox it leaves out balances set in the developer dashboard."> · as reported by PayPal</span>
                 </span>
-                {preflight.short_by !== null ? (
+                {/* Only with real money: in the sandbox PayPal's reported balance lags and leaves out
+                    balances set in the developer dashboard, so a shortfall there means nothing. */}
+                {preflight.short_by !== null && preflight.balance_blocks ? (
                   <span style={{ color: "var(--warn-ink)" }}>
-                    {money(preflight.short_by, preflight.currency)} short of this batch.{" "}
-                    {preflight.balance_blocks
-                      ? "Sending will be refused until funds are added."
-                      : "Sandbox: PayPal's reports leave out balances set in the developer dashboard, so it can still be sent."}
+                    {money(preflight.short_by, preflight.currency)} short of this batch. Sending will be refused until funds are added.
                   </span>
                 ) : null}
                 {preflight.turned_away.length ? (
