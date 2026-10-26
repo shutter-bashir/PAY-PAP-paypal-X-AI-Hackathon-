@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Re-created by the Next.js dev server; not part of the project
+AGENTS.md
+CLAUDE.md
