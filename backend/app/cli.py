@@ -21,6 +21,7 @@ from app import approvals, demo_data, payouts
 from app.config import settings
 from app.csv_import import CsvImportError
 from app.importer import import_csv
+from app.paypal_balances import BalanceReader
 from app.paypal_client import PayPalClient, PayPalError
 from app.store import Store, StoreError
 
@@ -212,10 +213,11 @@ def cmd_submit(args) -> int:
     store = Store.from_settings(settings)
     user = _user(store, args.as_email)
     batch = store.find_batch(args.batch)
-    with PayPalClient.from_settings(settings) as paypal:
+    with PayPalClient.from_settings(settings) as paypal, BalanceReader.from_settings(settings) as balances:
         result = payouts.submit_batch(store, paypal, batch_id=batch["id"],
                                       signing_secret=settings.approval_signing_secret.get_secret_value(),
-                                      submitted_by=user["id"], require_funds=settings.paypal_mode == "live")
+                                      submitted_by=user["id"], balances=balances,
+                                      require_funds=settings.paypal_mode == "live")
     print(f"attempt {result.attempt_no}: {result.outcome} (HTTP {result.http_status}) -> batch {result.batch_status}")
     if result.payout_batch_id:
         print(f"  PayPal payout_batch_id {result.payout_batch_id}")

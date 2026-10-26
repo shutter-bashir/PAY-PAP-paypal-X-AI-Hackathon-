@@ -9,3 +9,4 @@ supabase==2.33.0
 PyJWT==2.15.1
 python-dotenv>=1.0
 pytest==9.1.1
+paypal @ git+https://github.com/context-plugins/paypal-python-sdk.git@143e57f2a3729d7df3727386b8c9ddf023d9a5df  # APIMatic PayPal SDK (balance check); not on PyPI

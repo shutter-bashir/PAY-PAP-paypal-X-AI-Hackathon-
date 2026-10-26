@@ -470,8 +470,9 @@ class AgentTools:
     """The agent's whole world: one batch, five tools."""
 
     def __init__(self, store, settings, *, batch_id: str, user_id: str | None, assistant: Assistant | None = None,
-                 paypal_factory: Callable | None = None):
+                 paypal_factory: Callable | None = None, balances=None):
         self._store = store
+        self._balances = balances
         self._settings = settings
         self._batch_id = batch_id
         self._user_id = user_id
@@ -573,7 +574,7 @@ class AgentTools:
             raise payouts.SubmitRefused("Submitting is not enabled in this context.")
         with self._paypal_factory() as paypal:
             result = payouts.submit_batch(self._store, paypal, batch_id=self._batch_id, signing_secret=secret,
-                                          submitted_by=self._user_id,
+                                          submitted_by=self._user_id, balances=self._balances,
                                           require_funds=self._settings.paypal_mode == "live")
         return {"outcome": result.outcome, "batch_status": result.batch_status, "attempt": result.attempt_no,
                 "paypal_payout_batch_id": result.payout_batch_id, "error": result.error}

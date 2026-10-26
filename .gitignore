@@ -26,3 +26,6 @@ Thumbs.db
 # Private notes and sandbox account passwords (kept on this PC only)
 work-doc.md
 backend/seed/sandbox_accounts/
+
+# Working plan for the PayPal SDK integration
+paypal-plan.md

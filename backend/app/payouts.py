@@ -25,6 +25,7 @@ from decimal import Decimal
 import httpx
 
 from app import approvals, rules
+from app.paypal_balances import BalanceReader
 from app.paypal_client import PayPalClient, PayPalError, debug_id, safe_json
 from app.store import Store, StoreError
 
@@ -164,7 +165,8 @@ class Preflight:
         return self.total - self.balance if self.balance is not None and self.balance < self.total else None
 
 
-def preflight(store: Store, paypal: PayPalClient, *, batch_id: str, currency: str) -> Preflight:
+def preflight(store: Store, balances: BalanceReader | None, *, batch_id: str, currency: str) -> Preflight:
+    """balances: None skips the balance (it is then reported as not checked)."""
     included = store.included_items(batch_id)
     history = rules.PayPalHistory.from_payouts(store.payout_history())
     turned_away = []
@@ -175,15 +177,19 @@ def preflight(store: Store, paypal: PayPalClient, *, batch_id: str, currency: st
                                 "reason": problem[1]})
     check = Preflight(total=sum((Decimal(str(i["amount"])) for i in included), Decimal(0)), currency=currency,
                       turned_away=turned_away)
+    if balances is None:
+        check.balance_error = "not checked"
+        return check
     try:
-        check.balance = paypal.available_balance(currency)
-    except (PayPalError, httpx.HTTPError) as exc:
+        check.balance = balances.available(currency)
+    except PayPalError as exc:  # an unreadable balance never blocks a payout
         check.balance_error = str(exc)
     return check
 
 
 def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_secret: str,
-                 submitted_by: str | None = None, require_funds: bool = False) -> SubmitResult:
+                 submitted_by: str | None = None, balances: BalanceReader | None = None,
+                 require_funds: bool = False) -> SubmitResult:
     """require_funds: refuse when the PayPal balance cannot cover the batch. Live PayPal denies such a
     batch; the sandbox lets the balance go negative, so there it is only a warning."""
     approval = store.live_approval(batch_id)
@@ -196,7 +202,7 @@ def submit_batch(store: Store, paypal: PayPalClient, *, batch_id: str, signing_s
                             "or was changed afterwards. Revoke it and approve again.")
 
     # Checked before an attempt is recorded, so a refusal leaves the batch approved and untouched.
-    check = preflight(store, paypal, batch_id=batch_id, currency=approval["currency"])
+    check = preflight(store, balances, batch_id=batch_id, currency=approval["currency"])
     if check.turned_away:
         rows = ", ".join(f"{t['row']} ({t['receiver']})" for t in check.turned_away[:10])
         store.write_audit(action="payout.refused", entity_type="batch", entity_id=batch_id, batch_id=batch_id,

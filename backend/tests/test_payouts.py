@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from app import approvals, payouts
-from app.paypal_client import PayPalClient
+from app.paypal_client import PayPalClient, PayPalError
 from app.store import StoreError
 
 SECRET = "test-secret"
@@ -94,13 +94,10 @@ class FakeStore:
         pass
 
 
-def paypal_with(handler, balance="100000.00"):
+def paypal_with(handler):
     def route(request: httpx.Request):
         if request.url.path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
-        if request.url.path == "/v1/reporting/balances":
-            return httpx.Response(200, json={"balances": [{"currency": "USD", "available_balance":
-                                                           {"currency_code": "USD", "value": balance}}]})
         return handler(request)
     return PayPalClient("https://api-m.sandbox.paypal.com", "id", "secret", transport=httpx.MockTransport(route))
 
@@ -250,8 +247,6 @@ def test_expired_token_is_refreshed_once():
     def route(request):
         if request.url.path == "/v1/oauth2/token":
             return httpx.Response(200, json={"access_token": next(tokens), "expires_in": 3600})
-        if request.url.path == "/v1/reporting/balances":  # the pre-send check; not what this test is about
-            return httpx.Response(200, json={"balances": []})
         calls.append(request.headers["Authorization"])
         return httpx.Response(401) if len(calls) == 1 else created(request)
 
@@ -358,29 +353,34 @@ def test_receivers_paypal_turned_away_are_refused_before_any_attempt():
     assert store.attempts == [] and store.audits[-1]["action"] == "payout.refused"
 
 
+class FakeBalances:
+    """Stands in for BalanceReader (the APIMatic SDK client); tested on its own in test_paypal_balances.py."""
+
+    def __init__(self, balance=None, error=None):
+        self.balance, self.error = balance, error
+
+    def available(self, currency):
+        if self.error:
+            raise self.error
+        return None if self.balance is None else Decimal(self.balance)
+
+
 def test_low_balance_blocks_only_when_funds_are_required():
     store = FakeStore()
     with pytest.raises(payouts.SubmitRefused, match="short"):
-        payouts.submit_batch(store, paypal_with(lambda r: pytest.fail("not sent"), balance="100.00"),
-                             batch_id=BATCH_ID, signing_secret=SECRET, require_funds=True)
+        payouts.submit_batch(store, paypal_with(lambda r: pytest.fail("not sent")), batch_id=BATCH_ID,
+                             signing_secret=SECRET, balances=FakeBalances("100.00"), require_funds=True)
     assert store.attempts == []
     # The sandbox lets the balance go negative: warn, then send.
-    result = submit(store, paypal_with(created, balance="-12398.81"))
+    result = payouts.submit_batch(store, paypal_with(created), batch_id=BATCH_ID, signing_secret=SECRET,
+                                  balances=FakeBalances("-12398.81"))
     assert result.outcome == "accepted" and store.audits[-1]["action"] == "payout.balance_warning"
 
 
 def test_an_unreadable_balance_does_not_stop_a_payout():
-    def no_balance(request):
-        return created(request)
-
-    def route(request):
-        if request.url.path == "/v1/oauth2/token":
-            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
-        if request.url.path == "/v1/reporting/balances":
-            return httpx.Response(403, json={"name": "NOT_AUTHORIZED", "message": "no reporting access"})
-        return no_balance(request)
-
-    paypal = PayPalClient("https://api-m.sandbox.paypal.com", "id", "secret", transport=httpx.MockTransport(route))
-    check = payouts.preflight(FakeStore(), paypal, batch_id=BATCH_ID, currency="USD")
+    unreadable = FakeBalances(error=PayPalError(403, "NOT_AUTHORIZED", "no reporting access", None))
+    check = payouts.preflight(FakeStore(), unreadable, batch_id=BATCH_ID, currency="USD")
     assert check.balance is None and "403" in check.balance_error and check.total == Decimal("150.5")
-    assert submit(FakeStore(), paypal).outcome == "accepted"
+    result = payouts.submit_batch(FakeStore(), paypal_with(created), batch_id=BATCH_ID, signing_secret=SECRET,
+                                  balances=unreadable, require_funds=True)
+    assert result.outcome == "accepted"

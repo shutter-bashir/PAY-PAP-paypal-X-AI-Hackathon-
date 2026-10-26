@@ -430,6 +430,7 @@ export default function BatchPage() {
                 <span className="muted">
                   PayPal balance:{" "}
                   {preflight.balance !== null ? <strong style={{ color: "var(--ink)" }}>{money(preflight.balance, preflight.currency)}</strong> : "could not be read"}
+                  <span title="Read with the APIMatic PayPal SDK. PayPal can take up to 3 hours to update a balance."> · may lag up to 3 h</span>
                 </span>
                 {preflight.short_by !== null ? (
                   <span style={{ color: "var(--warn-ink)" }}>

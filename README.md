@@ -56,6 +56,19 @@ The API and the web app are two Vercel projects made from this one repo, both on
 
 Vercel runs the API as short-lived functions, so there is no background worker there: payout statuses arrive by webhook, the batch page asks PayPal for news every 15 seconds while a batch is being paid, and the daily check catches anything left.
 
+## Before money moves
+
+Every send is checked first, and refused before anything reaches PayPal if it would fail:
+
+- **Receivers PayPal turned away before** (for example `INVALID_EMAIL`) are blocked at upload and again at send, and so is an email domain where PayPal has turned away 3 or more addresses and paid none.
+- **The PayPal balance** is read before sending and shown on the approval card. With real money (`PAYPAL_MODE=live`) a batch the balance cannot cover is refused; in the sandbox, which lets the balance go negative, it is a warning.
+
+## APIMatic
+
+- **APIMatic PayPal Python SDK** ([`backend/app/paypal_balances.py`](backend/app/paypal_balances.py)): the balance check calls `client.transaction_search.search_balances`, with typed error handling and tests against a stub transport ([`backend/tests/test_paypal_balances.py`](backend/tests/test_paypal_balances.py)). The SDK installs from GitHub (pinned in `requirements.txt`).
+- **APIMatic Context Plugin for PayPal**: the PayPal SDK guidance used while building.
+- Payouts, webhooks and payout status use a small hand-written client ([`backend/app/paypal_client.py`](backend/app/paypal_client.py)), because the APIMatic PayPal SDK has no Payouts API.
+
 ## Stack
 
-PayPal Payouts API (sandbox) · Groq (`openai/gpt-oss-120b`, set by `AI_PROVIDER` / `AI_MODEL`; Ollama also supported) · APIMatic Context Plugin · FastAPI · Supabase Postgres · Next.js with AG Grid · Vercel
+PayPal Payouts API (sandbox) · APIMatic PayPal SDK · Groq (`openai/gpt-oss-120b`, set by `AI_PROVIDER` / `AI_MODEL`; Ollama also supported) · FastAPI · Supabase Postgres · Next.js with AG Grid · Vercel

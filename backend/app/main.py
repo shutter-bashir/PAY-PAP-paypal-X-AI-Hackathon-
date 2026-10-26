@@ -1,6 +1,7 @@
 """HTTP API. Run from backend/:  uvicorn app.main:app --reload"""
 from __future__ import annotations
 
+import atexit
 import csv
 import hmac
 import io
@@ -23,6 +24,7 @@ from app import ai, approvals, payouts, sandbox_accounts, worker
 from app.config import settings
 from app.csv_import import CsvImportError, MAX_FILE_BYTES, parse_csv
 from app.importer import import_csv
+from app.paypal_balances import BalanceReader
 from app.paypal_client import PayPalClient, PayPalError
 from app.store import Store, StoreError
 
@@ -48,6 +50,14 @@ def get_store() -> Store:
 @lru_cache
 def get_paypal() -> PayPalClient:
     return PayPalClient.from_settings(settings)
+
+
+@lru_cache
+def get_balances() -> BalanceReader:
+    """One APIMatic SDK client per process: it keeps the connection pool and the OAuth token."""
+    reader = BalanceReader.from_settings(settings)
+    atexit.register(reader.close)
+    return reader
 
 
 def get_assistant() -> ai.Assistant:
@@ -266,7 +276,8 @@ class AgentIn(BaseModel):
 @app.post("/api/batches/{batch_id}/agent")
 def ask_agent(batch_id: str, body: AgentIn, store: StoreDep, user: UserDep):
     store.get_batch(batch_id)
-    tools = ai.AgentTools(store, settings, batch_id=batch_id, user_id=user.id, paypal_factory=SharedPayPal)
+    tools = ai.AgentTools(store, settings, batch_id=batch_id, user_id=user.id, paypal_factory=SharedPayPal,
+                          balances=get_balances())
     reply = get_assistant().run_agent(tools, body.question)
     return {"text": reply.text, "tool_calls": reply.tool_calls, "proposal": reply.proposal}
 
@@ -328,7 +339,8 @@ def submit(batch_id: str, store: StoreDep, user: UserDep):
     try:
         result = payouts.submit_batch(store, get_paypal(), batch_id=batch_id,
                                       signing_secret=settings.approval_signing_secret.get_secret_value(),
-                                      submitted_by=user.id, require_funds=settings.paypal_mode == "live")
+                                      submitted_by=user.id, balances=get_balances(),
+                                      require_funds=settings.paypal_mode == "live")
     except payouts.SubmitRefused as exc:
         raise HTTPException(409, str(exc))
     return result.__dict__
@@ -390,7 +402,7 @@ def cron_tick(request: Request, store: StoreDep):
 @app.get("/api/batches/{batch_id}/preflight")
 def batch_preflight(batch_id: str, store: StoreDep, _: UserDep):
     """What sending would run into: included rows PayPal turned away before, and the PayPal balance."""
-    check = payouts.preflight(store, get_paypal(), batch_id=batch_id, currency=store.get_batch(batch_id)["currency"])
+    check = payouts.preflight(store, get_balances(), batch_id=batch_id, currency=store.get_batch(batch_id)["currency"])
     return {"total": str(check.total), "currency": check.currency, "turned_away": check.turned_away,
             "balance": None if check.balance is None else str(check.balance), "balance_error": check.balance_error,
             "short_by": None if check.short_by is None else str(check.short_by),

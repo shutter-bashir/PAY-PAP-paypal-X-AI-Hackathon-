@@ -97,7 +97,10 @@ class Store:
         return self._run(self._db.table("batch_overview").select("*").order("batch_no", desc=True).limit(limit))
 
     def batch_overview(self, batch_id: str) -> dict:
-        return self._one(self._db.table("batch_overview").select("*").eq("batch_id", batch_id))
+        overview = self._one(self._db.table("batch_overview").select("*").eq("batch_id", batch_id))
+        if overview is None:
+            raise StoreError(f"batch {batch_id} not found")
+        return overview
 
     def items(self, batch_id: str) -> list[dict]:
         return self._all(lambda: self._db.table("batch_item_overview").select("*").eq("batch_id", batch_id)
@@ -208,7 +211,7 @@ class Store:
             "p_paypal_batch_status": paypal_batch_status, "p_request_body": request_body,
             "p_response_body": response_body, "p_error": error})
 
-    def apply_item_statuses(self, updates: list[Mapping], source: str) -> int:
+    def apply_item_statuses(self, updates: Sequence[Mapping], source: str) -> int:
         return self._rpc("apply_item_statuses", {"p_updates": _jsonable(updates), "p_source": source})
 
     def apply_batch_status(self, payout_batch_id: str, status: str) -> dict | None:
