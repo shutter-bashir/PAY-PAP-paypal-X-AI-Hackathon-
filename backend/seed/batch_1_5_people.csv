@@ -1,0 +1,6 @@
+Contractor ID,Name,PayPal Email,Amount (USD),Invoice Number,Country,Note
+P-0001,Joe Doe,joe-doe@gmail.com,98.25,INV-202614-0001,MX,"Web content, week 1 November 2026"
+P-0002,Peter Park,peter-park22@gmail.com,49.55,INV-202614-0002,IN,"Bug fixes, week 1 November 2026"
+P-0003,Vic Don Doom,vic-don-doom22@gmail.com,66.26,INV-202614-0003,PH,"Social media, week 1 November 2026"
+P-0004,Tony Stark,tony.stark@paypal.com,75.98,INV-202614-0004,GH,"QA testing, week 1 November 2026"
+P-0005,Bruce Banner,bruce.banner@gmail.com,64.89,INV-202614-0005,NG,"Copywriting, week 1 November 2026"

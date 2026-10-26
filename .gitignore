@@ -1,0 +1,28 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.postman_environment.local.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Private notes and sandbox account passwords (kept on this PC only)
+work-doc.md
+backend/seed/sandbox_accounts/
